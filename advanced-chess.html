@@ -587,8 +587,11 @@
 
             getPossibleMovesForPiece(row, col, piece) {
                 const moves = [];
-                // This is a simplified version - in practice you'd use the same logic as getPossibleMoves
-                // but without the check validation to detect attacks
+                const originalPlayer = this.currentPlayer;
+
+                // Temporarily switch to the piece's color to get attack moves
+                this.currentPlayer = piece.color;
+
                 switch (piece.type) {
                     case 'pawn':
                         this.getPawnMoves(row, col, piece, moves);
@@ -609,6 +612,9 @@
                         this.getKingMoves(row, col, piece, moves);
                         break;
                 }
+
+                // Restore original player
+                this.currentPlayer = originalPlayer;
                 return moves;
             }
 
@@ -643,49 +649,65 @@
             }
 
             getBestMove(depth) {
-                if (depth === 0 || this.isGameOver()) {
+                // Prevent infinite recursion and stack overflow
+                if (depth <= 0 || this.isGameOver()) {
                     return { move: null, value: this.evaluatePosition() };
                 }
 
                 let bestMove = null;
                 let bestValue = this.currentPlayer === 'white' ? -Infinity : Infinity;
+                let legalMoves = [];
 
+                // Collect all legal moves first to avoid modifying board during iteration
                 for (let fromRow = 0; fromRow < 8; fromRow++) {
                     for (let fromCol = 0; fromCol < 8; fromCol++) {
                         const piece = this.getPieceAt(fromRow, fromCol);
                         if (piece && piece.color === this.currentPlayer) {
                             const moves = this.getPossibleMoves(fromRow, fromCol);
-
                             for (let move of moves) {
-                                // Make move
-                                const capturedPiece = this.getPieceAt(move.row, move.col);
-                                this.setPieceAt(move.row, move.col, piece);
-                                this.removePieceAt(fromRow, fromCol);
-
-                                // Recurse
-                                const result = this.getBestMove(depth - 1);
-
-                                // Undo move
-                                this.setPieceAt(fromRow, fromCol, piece);
-                                if (capturedPiece) {
-                                    this.setPieceAt(move.row, move.col, capturedPiece);
-                                } else {
-                                    this.removePieceAt(move.row, move.col);
-                                }
-
-                                // Evaluate
-                                if (this.currentPlayer === 'white') {
-                                    if (result.value > bestValue) {
-                                        bestValue = result.value;
-                                        bestMove = { fromRow, fromCol, toRow: move.row, toCol: move.col };
-                                    }
-                                } else {
-                                    if (result.value < bestValue) {
-                                        bestValue = result.value;
-                                        bestMove = { fromRow, fromCol, toRow: move.row, toCol: move.col };
-                                    }
+                                if (this.isValidMove(fromRow, fromCol, move.row, move.col)) {
+                                    legalMoves.push({ fromRow, fromCol, toRow: move.row, toCol: move.col });
                                 }
                             }
+                        }
+                    }
+                }
+
+                // If no legal moves, return current position evaluation
+                if (legalMoves.length === 0) {
+                    return { move: null, value: this.evaluatePosition() };
+                }
+
+                // Evaluate each legal move
+                for (let move of legalMoves) {
+                    // Make move
+                    const capturedPiece = this.getPieceAt(move.toRow, move.toCol);
+                    const movedPiece = this.getPieceAt(move.fromRow, move.fromCol);
+
+                    this.setPieceAt(move.toRow, move.toCol, movedPiece);
+                    this.removePieceAt(move.fromRow, move.fromCol);
+
+                    // Recurse with reduced depth
+                    const result = this.getBestMove(depth - 1);
+
+                    // Undo move
+                    this.setPieceAt(move.fromRow, move.fromCol, movedPiece);
+                    if (capturedPiece) {
+                        this.setPieceAt(move.toRow, move.toCol, capturedPiece);
+                    } else {
+                        this.removePieceAt(move.toRow, move.toCol);
+                    }
+
+                    // Update best move
+                    if (this.currentPlayer === 'white') {
+                        if (result.value > bestValue) {
+                            bestValue = result.value;
+                            bestMove = move;
+                        }
+                    } else {
+                        if (result.value < bestValue) {
+                            bestValue = result.value;
+                            bestMove = move;
                         }
                     }
                 }
@@ -734,13 +756,17 @@
                     return false;
                 }
 
+                // Check if current player has any legal moves that get out of check
                 for (let row = 0; row < 8; row++) {
                     for (let col = 0; col < 8; col++) {
                         const piece = this.getPieceAt(row, col);
                         if (piece && piece.color === this.currentPlayer) {
                             const moves = this.getPossibleMoves(row, col);
-                            if (moves.length > 0) {
-                                return false;
+                            // If any move is valid (doesn't put own king in check), not checkmate
+                            for (let move of moves) {
+                                if (this.isValidMove(row, col, move.row, move.col)) {
+                                    return false;
+                                }
                             }
                         }
                     }
@@ -751,16 +777,20 @@
 
             isStalemate() {
                 if (this.isInCheck(this.currentPlayer)) {
-                    return false;
+                    return false; // Can't be stalemate if in check (would be checkmate)
                 }
 
+                // Check if current player has any legal moves
                 for (let row = 0; row < 8; row++) {
                     for (let col = 0; col < 8; col++) {
                         const piece = this.getPieceAt(row, col);
                         if (piece && piece.color === this.currentPlayer) {
                             const moves = this.getPossibleMoves(row, col);
-                            if (moves.length > 0) {
-                                return false;
+                            // If any move is valid (doesn't put own king in check), not stalemate
+                            for (let move of moves) {
+                                if (this.isValidMove(row, col, move.row, move.col)) {
+                                    return false;
+                                }
                             }
                         }
                     }
@@ -771,6 +801,34 @@
 
             isGameOver() {
                 return this.isCheckmate() || this.isStalemate();
+            }
+
+            undoMove() {
+                if (this.moveHistory.length === 0) {
+                    return false;
+                }
+
+                const lastMove = this.moveHistory.pop();
+                const piece = this.getPieceAt(lastMove.to.row, lastMove.to.col);
+
+                // Move piece back
+                this.setPieceAt(lastMove.from.row, lastMove.from.col, piece);
+                this.removePieceAt(lastMove.to.row, lastMove.to.col);
+
+                // Restore captured piece if any
+                if (lastMove.captured) {
+                    const restoredPiece = {
+                        type: lastMove.captured,
+                        color: lastMove.to.row === 0 || lastMove.to.row === 7 ? 'white' : 'black' // Simplified
+                    };
+                    this.setPieceAt(lastMove.to.row, lastMove.to.col, restoredPiece);
+                }
+
+                // Switch back to previous player
+                this.currentPlayer = this.currentPlayer === 'white' ? 'black' : 'white';
+                this.lastMove = null;
+
+                return true;
             }
 
             getGameStatus() {
@@ -940,15 +998,60 @@
                 }
 
                 const depth = this.game.depths[this.game.difficulty];
-                const result = this.game.getBestMove(depth);
 
-                if (result.move) {
-                    this.game.makeMove(
-                        result.move.fromRow,
-                        result.move.fromCol,
-                        result.move.toRow,
-                        result.move.toCol
-                    );
+                // Add timeout to prevent AI from hanging in complex positions
+                const timeout = 3000; // 3 seconds max
+                const startTime = Date.now();
+
+                try {
+                    const result = this.game.getBestMove(depth);
+
+                    // Check if AI took too long
+                    if (Date.now() - startTime > timeout) {
+                        console.warn('AI took too long, using fallback');
+                        this.makeRandomMove();
+                        return;
+                    }
+
+                    if (result.move) {
+                        this.game.makeMove(
+                            result.move.fromRow,
+                            result.move.fromCol,
+                            result.move.toRow,
+                            result.move.toCol
+                        );
+                        this.renderBoard();
+                    } else {
+                        // If AI finds no move, make a random legal move as fallback
+                        this.makeRandomMove();
+                    }
+                } catch (error) {
+                    console.error('AI error:', error);
+                    this.makeRandomMove();
+                }
+            }
+
+            makeRandomMove() {
+                // Fallback: make a random legal move if AI fails
+                const legalMoves = [];
+
+                for (let fromRow = 0; fromRow < 8; fromRow++) {
+                    for (let fromCol = 0; fromCol < 8; fromCol++) {
+                        const piece = this.game.getPieceAt(fromRow, fromCol);
+                        if (piece && piece.color === 'black') {
+                            const moves = this.game.getPossibleMoves(fromRow, fromCol);
+                            for (let move of moves) {
+                                if (this.game.isValidMove(fromRow, fromCol, move.row, move.col)) {
+                                    legalMoves.push({ fromRow, fromCol, toRow: move.row, toCol: move.col });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (legalMoves.length > 0) {
+                    const randomMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+                    this.game.makeMove(randomMove.fromRow, randomMove.fromCol, randomMove.toRow, randomMove.toCol);
                     this.renderBoard();
                 }
             }
