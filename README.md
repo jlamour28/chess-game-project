@@ -49,8 +49,8 @@ Chess Game Project/
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
-   cd chess-game-project
+   git clone https://github.com/JLamour28/Chess-game-project.git
+   cd Chess-game-project
    ```
 
 2. **Install dependencies**
