@@ -856,22 +856,12 @@
                 this.possibleMoves = [];
                 this.draggedPiece = null;
                 this.dragOffset = { x: 0, y: 0 };
+                this.isDragging = false;
+                this.createBoard();
                 this.initializeEventListeners();
             }
 
-            initializeEventListeners() {
-                const board = document.getElementById('chess-board');
-                board.addEventListener('mousedown', this.handleMouseDown.bind(this));
-                board.addEventListener('mousemove', this.handleMouseMove.bind(this));
-                board.addEventListener('mouseup', this.handleMouseUp.bind(this));
-
-                // Touch events for mobile
-                board.addEventListener('touchstart', this.handleTouchStart.bind(this));
-                board.addEventListener('touchmove', this.handleTouchMove.bind(this));
-                board.addEventListener('touchend', this.handleTouchEnd.bind(this));
-            }
-
-            renderBoard() {
+            createBoard() {
                 const board = document.getElementById('chess-board');
                 board.innerHTML = '';
 
@@ -888,10 +878,60 @@
                             square.classList.add('piece');
                         }
 
-                        square.addEventListener('click', () => this.handleSquareClick(row, col));
+                        // Store references for event handling
+                        square.gameRow = row;
+                        square.gameCol = col;
+
+                        square.addEventListener('click', (e) => this.handleSquareClick(row, col));
                         board.appendChild(square);
                     }
                 }
+            }
+
+            initializeEventListeners() {
+                const board = document.getElementById('chess-board');
+                board.addEventListener('mousedown', this.handleMouseDown.bind(this));
+                board.addEventListener('mousemove', this.handleMouseMove.bind(this));
+                board.addEventListener('mouseup', this.handleMouseUp.bind(this));
+
+                // Touch events for mobile
+                board.addEventListener('touchstart', this.handleTouchStart.bind(this));
+                board.addEventListener('touchmove', this.handleTouchMove.bind(this));
+                board.addEventListener('touchend', this.handleTouchEnd.bind(this));
+            }
+
+            renderBoard() {
+                const board = document.getElementById('chess-board');
+
+                // Clear existing highlights and selections first
+                const squares = board.querySelectorAll('.square');
+                squares.forEach(square => {
+                    square.classList.remove('selected', 'highlight', 'last-move', 'check');
+                });
+
+                // Update piece positions and symbols
+                for (let row = 0; row < 8; row++) {
+                    for (let col = 0; col < 8; col++) {
+                        const square = board.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                        if (square) {
+                            const piece = this.game.getPieceAt(row, col);
+                            if (piece) {
+                                square.innerHTML = this.getPieceSymbol(piece);
+                                square.classList.add('piece');
+                            } else {
+                                square.innerHTML = '';
+                                square.classList.remove('piece');
+                            }
+                        }
+                    }
+                }
+
+                // Re-attach click handlers (in case they were lost)
+                squares.forEach(square => {
+                    if (!square.onclick) {
+                        square.addEventListener('click', () => this.handleSquareClick(square.gameRow, square.gameCol));
+                    }
+                });
 
                 this.highlightLastMove();
                 this.updateStatus();
@@ -929,10 +969,12 @@
                     }
                 } else {
                     if (row === this.selectedSquare.row && col === this.selectedSquare.col) {
+                        // Clicking the same square - deselect
                         this.selectedSquare = null;
                         this.possibleMoves = [];
                         this.renderBoard();
                     } else if (this.possibleMoves.some(move => move.row === row && move.col === col)) {
+                        // Valid move - execute it
                         this.game.makeMove(this.selectedSquare.row, this.selectedSquare.col, row, col);
                         this.selectedSquare = null;
                         this.possibleMoves = [];
@@ -942,9 +984,18 @@
                             setTimeout(() => this.makeAIMove(), 500);
                         }
                     } else {
-                        this.selectedSquare = null;
-                        this.possibleMoves = [];
-                        this.renderBoard();
+                        // Clicked on a different piece or invalid square - select new piece
+                        if (piece && piece.color === this.game.currentPlayer) {
+                            this.selectedSquare = { row, col };
+                            this.possibleMoves = this.game.getPossibleMoves(row, col);
+                            this.renderBoard();
+                            this.highlightSelectedSquare();
+                            this.highlightPossibleMoves();
+                        } else {
+                            this.selectedSquare = null;
+                            this.possibleMoves = [];
+                            this.renderBoard();
+                        }
                     }
                 }
             }
@@ -1095,6 +1146,9 @@
 
             // Drag and Drop functionality
             handleMouseDown(e) {
+                // Only handle drag if we're not in the middle of a click selection
+                if (this.selectedSquare) return;
+
                 const square = e.target.closest('.square');
                 if (!square) return;
 
@@ -1102,8 +1156,8 @@
                 const col = parseInt(square.dataset.col);
                 const piece = this.game.getPieceAt(row, col);
 
-                if (piece && piece.color === this.game.currentPlayer) {
-                    this.draggedPiece = { row, col, piece };
+                if (piece && piece.color === this.game.currentPlayer && !this.selectedSquare) {
+                    this.draggedPiece = { row, col, piece, startX: e.clientX, startY: e.clientY };
                     this.dragOffset.x = e.offsetX;
                     this.dragOffset.y = e.offsetY;
 
@@ -1122,21 +1176,20 @@
                 if (!this.draggedPiece) return;
 
                 const square = e.target.closest('.square');
-                if (square) {
+                let moveMade = false;
+
+                if (square && this.draggedPiece) {
                     const toRow = parseInt(square.dataset.row);
                     const toCol = parseInt(square.dataset.col);
 
-                    this.game.makeMove(
-                        this.draggedPiece.row,
-                        this.draggedPiece.col,
-                        toRow,
-                        toCol
-                    );
-
-                    this.renderBoard();
-
-                    if (this.game.gameMode === 'ai' && !this.game.isGameOver()) {
-                        setTimeout(() => this.makeAIMove(), 500);
+                    // Only make move if it's a different square
+                    if (!(toRow === this.draggedPiece.row && toCol === this.draggedPiece.col)) {
+                        moveMade = this.game.makeMove(
+                            this.draggedPiece.row,
+                            this.draggedPiece.col,
+                            toRow,
+                            toCol
+                        );
                     }
                 }
 
@@ -1149,6 +1202,15 @@
                 }
 
                 this.draggedPiece = null;
+
+                // Re-render board if a move was made
+                if (moveMade) {
+                    this.renderBoard();
+
+                    if (this.game.gameMode === 'ai' && !this.game.isGameOver()) {
+                        setTimeout(() => this.makeAIMove(), 500);
+                    }
+                }
             }
 
             // Touch events for mobile
