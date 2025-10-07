@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Advanced Chess Game - Pure JavaScript</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.js"></script>
     <style>
         * {
             margin: 0;
@@ -335,53 +336,169 @@
     <script>
         class ChessGame {
             constructor() {
-                this.board = this.createInitialBoard();
-                this.currentPlayer = 'white';
+                this.game = new Chess();
                 this.selectedSquare = null;
                 this.possibleMoves = [];
                 this.lastMove = null;
                 this.moveHistory = [];
                 this.gameMode = 'human';
                 this.difficulty = 'medium';
-                this.depths = { easy: 2, medium: 3, hard: 4 };
+                this.aiDepths = { easy: 2, medium: 3, hard: 4 };
                 this.draggedPiece = null;
                 this.dragOffset = { x: 0, y: 0 };
             }
 
-            createInitialBoard() {
-                const board = Array(8).fill().map(() => Array(8).fill(null));
+            newGame() {
+                this.game = new Chess();
+                this.selectedSquare = null;
+                this.possibleMoves = [];
+                this.lastMove = null;
+                this.moveHistory = [];
+            }
 
-                // Place pawns
-                for (let i = 0; i < 8; i++) {
-                    board[1][i] = { type: 'pawn', color: 'black' };
-                    board[6][i] = { type: 'pawn', color: 'white' };
+            makeMove(from, to) {
+                const move = {
+                    from: from,
+                    to: to,
+                    promotion: 'q' // Always promote to queen for simplicity
+                };
+
+                const result = this.game.move(move);
+                if (result) {
+                    this.lastMove = { from, to };
+                    this.moveHistory.push(result.san);
+                    return true;
+                }
+                return false;
+            }
+
+            getPossibleMoves(square) {
+                return this.game.moves({ square: square, verbose: true });
+            }
+
+            isCheck() {
+                return this.game.in_check();
+            }
+
+            isCheckmate() {
+                return this.game.in_checkmate();
+            }
+
+            isStalemate() {
+                return this.game.in_stalemate();
+            }
+
+            isGameOver() {
+                return this.game.game_over();
+            }
+
+            getTurn() {
+                return this.game.turn();
+            }
+
+            undoMove() {
+                const move = this.game.undo();
+                if (move) {
+                    this.moveHistory.pop();
+                    this.lastMove = null;
+                    return true;
+                }
+                return false;
+            }
+
+            getAIMove() {
+                const depth = this.aiDepths[this.difficulty];
+                return this.getBestMove(this.game, depth);
+            }
+
+            getBestMove(game, depth) {
+                if (depth === 0 || game.game_over()) {
+                    return this.evaluatePosition(game);
                 }
 
-                // Place other pieces
-                const pieceOrder = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'];
+                let bestMove = null;
+                let bestValue = game.turn() === 'w' ? -Infinity : Infinity;
 
-                for (let i = 0; i < 8; i++) {
-                    board[0][i] = { type: pieceOrder[i], color: 'black' };
-                    board[7][i] = { type: pieceOrder[i], color: 'white' };
+                const moves = game.moves({ verbose: true });
+
+                for (let move of moves) {
+                    game.move(move);
+                    const value = this.getBestMove(game, depth - 1);
+                    game.undo();
+
+                    if (game.turn() === 'w') {
+                        if (value > bestValue) {
+                            bestValue = value;
+                            bestMove = move;
+                        }
+                    } else {
+                        if (value < bestValue) {
+                            bestValue = value;
+                            bestMove = move;
+                        }
+                    }
                 }
 
-                return board;
+                return bestMove;
             }
 
-            getPieceAt(row, col) {
-                return this.board[row][col];
+            evaluatePosition(game) {
+                if (game.in_checkmate()) {
+                    return game.turn() === 'w' ? -10000 : 10000;
+                }
+
+                if (game.in_stalemate() || game.in_draw()) {
+                    return 0;
+                }
+
+                let evaluation = 0;
+                const pieces = game.board();
+
+                for (let i = 0; i < 8; i++) {
+                    for (let j = 0; j < 8; j++) {
+                        const piece = pieces[i][j];
+                        if (piece) {
+                            const value = this.getPieceValue(piece.type, piece.color);
+                            evaluation += piece.color === 'w' ? value : -value;
+                        }
+                    }
+                }
+
+                return evaluation;
             }
 
-            setPieceAt(row, col, piece) {
-                this.board[row][col] = piece;
+            getPieceValue(type, color) {
+                const values = {
+                    'p': 100, 'n': 320, 'b': 330, 'r': 500, 'q': 900, 'k': 20000
+                };
+                return values[type] || 0;
             }
 
-            removePieceAt(row, col) {
-                this.board[row][col] = null;
+            getPieceAtSquare(square) {
+                return this.game.get(square);
             }
 
-            isValidPosition(row, col) {
-                return row >= 0 && row < 8 && col >= 0 && col < 8;
+            getGameStatus() {
+                if (this.game.in_checkmate()) {
+                    const winner = this.game.turn() === 'w' ? 'Black' : 'White';
+                    return `Checkmate! ${winner} wins!`;
+                }
+
+                if (this.game.in_stalemate()) {
+                    return 'Stalemate! It\'s a draw.';
+                }
+
+                if (this.game.in_draw()) {
+                    return 'Draw!';
+                }
+
+                if (this.game.in_check()) {
+                    const turn = this.game.turn() === 'w' ? 'White' : 'Black';
+                    return `${turn} is in check!`;
+                }
+
+                const turn = this.game.turn() === 'w' ? 'White' : 'Black';
+                return `${turn} to move`;
             }
 
             getPossibleMoves(row, col) {
@@ -909,29 +1026,22 @@
                     square.classList.remove('selected', 'highlight', 'last-move', 'check');
                 });
 
-                // Update piece positions and symbols
-                for (let row = 0; row < 8; row++) {
-                    for (let col = 0; col < 8; col++) {
-                        const square = board.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                // Update piece positions and symbols using chess.js
+                for (let rank = 7; rank >= 0; rank--) {
+                    for (let file = 0; file < 8; file++) {
+                        const square = board.querySelector(`[data-square="${String.fromCharCode(97 + file)}${rank + 1}"]`);
                         if (square) {
-                            const piece = this.game.getPieceAt(row, col);
+                            const piece = this.game.game.get(String.fromCharCode(97 + file) + (rank + 1));
                             if (piece) {
                                 square.innerHTML = this.getPieceSymbol(piece);
-                                square.classList.add('piece');
+                                square.classList.add('piece', piece.color === 'w' ? 'white' : 'black');
                             } else {
                                 square.innerHTML = '';
-                                square.classList.remove('piece');
+                                square.classList.remove('piece', 'white', 'black');
                             }
                         }
                     }
                 }
-
-                // Re-attach click handlers (in case they were lost)
-                squares.forEach(square => {
-                    if (!square.onclick) {
-                        square.addEventListener('click', () => this.handleSquareClick(square.gameRow, square.gameCol));
-                    }
-                });
 
                 this.highlightLastMove();
                 this.updateStatus();
@@ -952,45 +1062,35 @@
                 return symbols[piece.color][piece.type] || '';
             }
 
-            handleSquareClick(row, col) {
-                if (this.game.gameMode === 'ai' && this.game.currentPlayer === 'black') {
-                    return;
+            handleSquareClick(square) {
+                if (this.game.gameMode === 'ai' && this.game.game.turn() === 'b') {
+                    return; // AI's turn
                 }
 
-                const piece = this.game.getPieceAt(row, col);
-
                 if (!this.selectedSquare) {
-                    if (piece && piece.color === this.game.currentPlayer) {
-                        this.selectedSquare = { row, col };
-                        this.possibleMoves = this.game.getPossibleMoves(row, col);
+                    const piece = this.game.game.get(square);
+                    if (piece && piece.color === this.game.game.turn()) {
+                        this.selectedSquare = square;
+                        this.possibleMoves = this.game.getPossibleMoves(square);
                         this.renderBoard();
-                        this.highlightSelectedSquare();
                         this.highlightPossibleMoves();
                     }
                 } else {
-                    if (row === this.selectedSquare.row && col === this.selectedSquare.col) {
-                        // Clicking the same square - deselect
+                    if (square === this.selectedSquare) {
                         this.selectedSquare = null;
                         this.possibleMoves = [];
                         this.renderBoard();
-                    } else if (this.possibleMoves.some(move => move.row === row && move.col === col)) {
-                        // Valid move - execute it
-                        this.game.makeMove(this.selectedSquare.row, this.selectedSquare.col, row, col);
-                        this.selectedSquare = null;
-                        this.possibleMoves = [];
-                        this.renderBoard();
-
-                        if (this.game.gameMode === 'ai' && !this.game.isGameOver()) {
-                            setTimeout(() => this.makeAIMove(), 500);
-                        }
                     } else {
-                        // Clicked on a different piece or invalid square - select new piece
-                        if (piece && piece.color === this.game.currentPlayer) {
-                            this.selectedSquare = { row, col };
-                            this.possibleMoves = this.game.getPossibleMoves(row, col);
-                            this.renderBoard();
-                            this.highlightSelectedSquare();
-                            this.highlightPossibleMoves();
+                        const move = this.possibleMoves.find(m => m.to === square);
+                        if (move) {
+                            this.game.makeMove(this.selectedSquare, square);
+                            this.selectedSquare = null;
+                            this.possibleMoves = [];
+
+                            // AI move if in AI mode
+                            if (this.game.gameMode === 'ai' && !this.game.game.game_over()) {
+                                setTimeout(() => this.makeAIMove(), 500);
+                            }
                         } else {
                             this.selectedSquare = null;
                             this.possibleMoves = [];
@@ -1011,9 +1111,9 @@
 
             highlightPossibleMoves() {
                 this.possibleMoves.forEach(move => {
-                    const square = document.querySelector(`[data-row="${move.row}"][data-col="${move.col}"]`);
+                    const square = document.querySelector(`[data-square="${move.to}"]`);
                     if (square) {
-                        square.classList.add('highlight');
+                        square.classList.add('possible-move');
                     }
                 });
             }
@@ -1044,18 +1144,18 @@
             }
 
             makeAIMove() {
-                if (this.game.gameMode !== 'ai' || this.game.currentPlayer !== 'black' || this.game.isGameOver()) {
+                if (this.game.gameMode !== 'ai' || this.game.game.turn() !== 'b' || this.game.game.game_over()) {
                     return;
                 }
 
-                const depth = this.game.depths[this.game.difficulty];
+                const depth = this.game.aiDepths[this.game.difficulty];
 
                 // Add timeout to prevent AI from hanging in complex positions
                 const timeout = 3000; // 3 seconds max
                 const startTime = Date.now();
 
                 try {
-                    const result = this.game.getBestMove(depth);
+                    const aiMove = this.game.getAIMove();
 
                     // Check if AI took too long
                     if (Date.now() - startTime > timeout) {
@@ -1064,13 +1164,8 @@
                         return;
                     }
 
-                    if (result.move) {
-                        this.game.makeMove(
-                            result.move.fromRow,
-                            result.move.fromCol,
-                            result.move.toRow,
-                            result.move.toCol
-                        );
+                    if (aiMove) {
+                        this.game.makeMove(aiMove.from, aiMove.to);
                         this.renderBoard();
                     } else {
                         // If AI finds no move, make a random legal move as fallback
@@ -1084,25 +1179,12 @@
 
             makeRandomMove() {
                 // Fallback: make a random legal move if AI fails
-                const legalMoves = [];
+                const moves = this.game.game.moves({ verbose: true });
+                const blackMoves = moves.filter(move => this.game.game.get(move.from).color === 'b');
 
-                for (let fromRow = 0; fromRow < 8; fromRow++) {
-                    for (let fromCol = 0; fromCol < 8; fromCol++) {
-                        const piece = this.game.getPieceAt(fromRow, fromCol);
-                        if (piece && piece.color === 'black') {
-                            const moves = this.game.getPossibleMoves(fromRow, fromCol);
-                            for (let move of moves) {
-                                if (this.game.isValidMove(fromRow, fromCol, move.row, move.col)) {
-                                    legalMoves.push({ fromRow, fromCol, toRow: move.row, toCol: move.col });
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (legalMoves.length > 0) {
-                    const randomMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
-                    this.game.makeMove(randomMove.fromRow, randomMove.fromCol, randomMove.toRow, randomMove.toCol);
+                if (blackMoves.length > 0) {
+                    const randomMove = blackMoves[Math.floor(Math.random() * blackMoves.length)];
+                    this.game.makeMove(randomMove.from, randomMove.to);
                     this.renderBoard();
                 }
             }
@@ -1114,7 +1196,7 @@
                 statusElement.textContent = this.game.getGameStatus();
 
                 if (this.game.gameMode === 'ai') {
-                    aiMoveBtn.style.display = this.game.currentPlayer === 'black' ? 'inline-block' : 'none';
+                    aiMoveBtn.style.display = this.game.game.turn() === 'b' ? 'inline-block' : 'none';
                 } else {
                     aiMoveBtn.style.display = 'none';
                 }
@@ -1152,12 +1234,15 @@
                 const square = e.target.closest('.square');
                 if (!square) return;
 
-                const row = parseInt(square.dataset.row);
-                const col = parseInt(square.dataset.col);
-                const piece = this.game.getPieceAt(row, col);
+                const piece = this.game.game.get(square.dataset.square);
 
-                if (piece && piece.color === this.game.currentPlayer && !this.selectedSquare) {
-                    this.draggedPiece = { row, col, piece, startX: e.clientX, startY: e.clientY };
+                if (piece && piece.color === this.game.game.turn() && !this.selectedSquare) {
+                    this.draggedPiece = {
+                        square: square.dataset.square,
+                        piece: piece,
+                        startX: e.clientX,
+                        startY: e.clientY
+                    };
                     this.dragOffset.x = e.offsetX;
                     this.dragOffset.y = e.offsetY;
 
@@ -1179,23 +1264,17 @@
                 let moveMade = false;
 
                 if (square && this.draggedPiece) {
-                    const toRow = parseInt(square.dataset.row);
-                    const toCol = parseInt(square.dataset.col);
+                    const toSquare = square.dataset.square;
 
                     // Only make move if it's a different square
-                    if (!(toRow === this.draggedPiece.row && toCol === this.draggedPiece.col)) {
-                        moveMade = this.game.makeMove(
-                            this.draggedPiece.row,
-                            this.draggedPiece.col,
-                            toRow,
-                            toCol
-                        );
+                    if (toSquare !== this.draggedPiece.square) {
+                        moveMade = this.game.makeMove(this.draggedPiece.square, toSquare);
                     }
                 }
 
                 // Reset drag state
                 if (this.draggedPiece) {
-                    const originalSquare = document.querySelector(`[data-row="${this.draggedPiece.row}"][data-col="${this.draggedPiece.col}"]`);
+                    const originalSquare = document.querySelector(`[data-square="${this.draggedPiece.square}"]`);
                     if (originalSquare) {
                         originalSquare.classList.remove('dragging');
                     }
@@ -1207,7 +1286,7 @@
                 if (moveMade) {
                     this.renderBoard();
 
-                    if (this.game.gameMode === 'ai' && !this.game.isGameOver()) {
+                    if (this.game.gameMode === 'ai' && !this.game.game.game_over()) {
                         setTimeout(() => this.makeAIMove(), 500);
                     }
                 }
@@ -1219,9 +1298,7 @@
                 const touch = e.touches[0];
                 const square = document.elementFromPoint(touch.clientX, touch.clientY);
                 if (square && square.classList.contains('square')) {
-                    const row = parseInt(square.dataset.row);
-                    const col = parseInt(square.dataset.col);
-                    this.handleSquareClick(row, col);
+                    this.handleSquareClick(square.dataset.square);
                 }
             }
 
@@ -1253,7 +1330,7 @@
         }
 
         function undoMove() {
-            chessUI.game.undoMove();
+            chessUI.game.game.undo();
             chessUI.renderBoard();
         }
 
